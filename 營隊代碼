@@ -1,0 +1,102 @@
+import streamlit as st
+import pandas as pd
+
+# 設定網頁標題與版面
+st.set_page_config(
+    page_title="2026 高中生理科寒假營隊搜尋引擎",
+    page_icon="❄️",
+    layout="centered"
+)
+
+# --- 1. 讀取 Google Sheet 資料 ---
+@st.cache_data(ttl=600) # ttl=600 代表每 10 分鐘自動更新一次
+def load_data():
+    # 這是你剛剛給我的網址，我已經轉成 CSV 下載模式了
+    sheet_url = "https://docs.google.com/spreadsheets/d/1hy7IEADYmXKVomJb3KmF0gFI6pB_Cd0SFd4sbSfHbZQ/export?format=csv"
+    
+    try:
+        # pandas 直接讀取線上的 CSV 連結
+        df = pd.read_csv(sheet_url)
+        # 把空值補上空白字串，避免程式出錯
+        df = df.fillna("")
+        return df
+    except Exception as e:
+        st.error(f"無法讀取資料，請檢查 Google Sheet 權限是否設為「公開/檢視」。\n錯誤訊息: {e}")
+        return pd.DataFrame()
+
+# --- 2. 應用程式主介面 ---
+def main():
+    st.title("❄️ 2026 高中生理科寒假營隊")
+    st.caption("資料來源：Google Sheet 線上資料庫 (即時更新)")
+
+    # 載入資料
+    df = load_data()
+
+    # 如果資料是空的，就停止執行
+    if df.empty:
+        st.warning("⚠️ 目前資料庫是空的，或連結權限沒開。請檢查 Google Sheet 共用設定。")
+        st.stop()
+
+    # --- 3. 側邊欄：篩選條件 ---
+    with st.sidebar:
+        st.header("🎯 篩選條件")
+        
+        # 建立篩選單
+        # 使用 set() 來過濾重複的選項，並轉回 list 排序
+        # 確保資料轉為字串 (astype(str)) 以避免讀到空值出錯
+        all_locations = ["全部"] + sorted(list(set(df["地區"].astype(str))))
+        selected_location = st.selectbox("📍 舉辦地區", all_locations)
+        
+        all_categories = ["全部"] + sorted(list(set(df["領域"].astype(str))))
+        selected_category = st.selectbox("📚 學群領域", all_categories)
+        
+        search_query = st.text_input("🔍 關鍵字搜尋", placeholder="例如：成大、醫學")
+        
+        # 重新整理按鈕 (方便你測試資料更新)
+        if st.button("🔄 更新資料"):
+            st.cache_data.clear() # 清除快取
+            st.rerun()            # 重新執行
+
+    # --- 4. 資料過濾邏輯 ---
+    filtered_df = df.copy()
+
+    if selected_location != "全部":
+        filtered_df = filtered_df[filtered_df["地區"] == selected_location]
+    
+    if selected_category != "全部":
+        filtered_df = filtered_df[filtered_df["領域"] == selected_category]
+
+    if search_query:
+        # 模糊搜尋：名稱、主辦單位、關鍵字 只要其中一個有對應到就算
+        mask = (
+            filtered_df["營隊名稱"].astype(str).str.contains(search_query, case=False) |
+            filtered_df["主辦單位"].astype(str).str.contains(search_query, case=False) |
+            filtered_df["關鍵字"].astype(str).str.contains(search_query, case=False)
+        )
+        filtered_df = filtered_df[mask]
+
+    # --- 5. 顯示結果 ---
+    st.subheader(f"搜尋結果：共 {len(filtered_df)} 個營隊")
+    
+    if len(filtered_df) == 0:
+        st.info("沒有找到符合條件的營隊。")
+    else:
+        for index, row in filtered_df.iterrows():
+            with st.container():
+                c1, c2 = st.columns([0.8, 0.2])
+                
+                with c1:
+                    st.markdown(f"### {row['營隊名稱']}")
+                    st.markdown(f"**單位**：{row['主辦單位']} | **地點**：{row['地點']}")
+                    st.markdown(f"**時間**：{row['預估月份']} | **領域**：`{row['領域']}`")
+                
+                with c2:
+                    st.write("") # 排版空格
+                    # 讀取 Excel 裡面的連結欄位，如果空的就自動產生 Google 搜尋連結
+                    link = row['連結'] if str(row['連結']).startswith("http") else f"https://www.google.com/search?q={row['營隊名稱']}"
+                    st.link_button("👉 查看", link, use_container_width=True)
+                
+                st.divider()
+
+if __name__ == "__main__":
+    main()
